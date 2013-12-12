@@ -12,3 +12,17 @@ doivent permettre :
 - de gérer les demandes de ressources via des projections vers l’exécution de scripts CGI ;
 - de gérer un journal traçant notamment les requêtes traitées ;
 - de traiter les requêtes de plusieurs clients en parallèles
+
+
+Todo
+==========
+- Script Start Stop
+- Serveur web (avec fork pour multi client)
+- Gerer les redirections (Routes)
+- Gerer les CGI
+- gerer les formats .jpg, .html et textes
+- Fichier de logs
+
+
+Fix
+==========
