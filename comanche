@@ -68,8 +68,43 @@ sub parse_request
     return ("client" => $client, "path" => $chemin, "file" => $fichier);
 }
 
+sub parse_conf
+{
+    %conf = ();
+    open(CONF,"comanche.conf");
+    while(<CONF>)
+    {
+	chomp;
+	@tmpset = split('\s',$_) if(/set/);
+	@tmproute = split('\s',$_) if(/route/);
+	@tmpexec = split('\s',$_) if(/exec/);
+	if ($tmpset[0] ne "")
+	{
+	    $conf{"$tmpset[1]"} = "$tmpset[2]";
+	}
+	if ($tmproute[0] ne "")
+	{
+	    $conf{"route1"} = "$tmproute[1]";
+	    $conf{"route2"} = "$tmproute[3]";
+	}
+	if ($tmpexec[0] ne "")
+	{
+	    $conf{"exec1"} = "$tmpexec[3]";
+	    $conf{"exec2"} = "$tmpexec[3]";
+	}
+	
+    }
+    return %conf;
+}
+
 $requete = "meleze12/Bureau/Systeme/TPlong/fichier.html";
-
 %params = parse_request($requete);
+#print $params{"file"},"\n";
 
-print $params{"file"},"\n";
+%conf = parse_conf();
+#print $conf{"route2"},"\n";
+
+#foreach $k (keys(%conf))
+#{
+#    print "$k => $conf{$k}\n";
+#}

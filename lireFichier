@@ -1,17 +1,24 @@
 #!/usr/bin/perl
 
-open(CONF,"comanche.conf");
-while(<CONF>)
+sub parse_conf
 {
-    chomp;
-    
-    @tmp=split('\s',$_) if(grep {"/set/"} $_);
-#    $set{$tmp[1]} = $tmp{2} if(grep {!/^set/} @tmp)
-#    $set{$tmp[1]}="ok" if (grep{/set/} @tmp);
-    $set{$tmp[1]}=$tmp[2];
+    @tmp = ();
+    %set = ();
+    open(CONF,"comanche.conf");
+    while(<CONF>)
+    {
+	chomp;
+	@tmp = split('\s',$_) if(/set/);
+	if ($tmp[0] ne "")
+	{
+	    $set{"$tmp[1]"} = "$tmp[2]";
+	}
+    }
+    return %set;
 }
 
+%set = parse_conf();
 foreach $k (keys(%set))
 {
-    print "Clef=$k Valeur=$set{$k}\n";
+    print "$k => $set{$k}\n";
 }
