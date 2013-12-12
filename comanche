@@ -1,22 +1,56 @@
 #!/usr/bin/perl
+
 use Socket;
-socket(SERVEUR, PF_INET, SOCK_STREAM, getprotobyname('tcp'));
-setsockopt(SERVEUR, SOL_SOCKET, SOREUSEADDR, 1);
 
-$mon_adresse = sockaddr_in("7777", INADDR_ANY);
+%set = lireFichier();
 
-bind(SERVEUR,$mon_adresse) || die("bind");
+sub simple_serveur()
+{
+    socket(SERVEUR, PF_INET, SOCK_STREAM, getprotobyname('tcp'));
+    setsockopt(SERVEUR, SOL_SOCKET, SOREUSEADDR, 1);
 
-listen(SERVEUR, SOMAXCONN) || die("listen");
-autoflush CLIENT 1;
-while(accept(CLIENT, SERVEUR)){
-    $pid = fork;
-    if($pid == 0)
+    $mon_adresse = sockaddr_in($set{"port"}, INADDR_ANY);
+
+    bind(SERVEUR,$mon_adresse) || die("bind");
+
+    listen(SERVEUR, $set{"clients"}) || die("listen");
+    autoflush CLIENT 1;
+    while(accept(CLIENT, SERVEUR))
     {
-	while(<CLIENT>){
-	    print CLIENT $_;
+	$pid = fork;
+	if($pid == 0)
+	{
+	    while(<CLIENT>)
+	    {
+		print CLIENT $_;
+	    }
+	    exit 0;
 	}
-	exit 0;
     }
+    close (SERVEUR);
 }
-close (SERVEUR);
+
+sub get_request()
+{
+    socket(SERVEUR, PF_INET, SOCK_STREAM, getprotobyname('tcp'));
+    $adresse = inet_aton(@ARGV[0]) || die("inet_aton");
+    $adresse_complete = sockaddr_in($set{"port"}, $adresse) || die ("sock_addr");
+    connect(SERVEUR,$adresse_complete) || die("connect");
+
+    autoflush SERVEUR 1;
+    printf SERVEUR "GET /$ARGV[1] HTTP/1.1\n";
+    printf SERVEUR "Host:$ARGV[0]\n";
+    printf SERVEUR "\n";
+
+    while (<SERVEUR>)
+    {
+	print $_;
+    }
+
+    close (SERVEUR);
+}
+
+sub lireFichier()
+{
+    
+}
