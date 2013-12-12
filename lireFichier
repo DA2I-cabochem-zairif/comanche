@@ -1,0 +1,17 @@
+#!/usr/bin/perl
+
+open(CONF,"comanche.conf");
+while(<CONF>)
+{
+    chomp;
+    
+    @tmp=split('\s',$_) if(grep {"/set/"} $_);
+#    $set{$tmp[1]} = $tmp{2} if(grep {!/^set/} @tmp)
+#    $set{$tmp[1]}="ok" if (grep{/set/} @tmp);
+    $set{$tmp[1]}=$tmp[2];
+}
+
+foreach $k (keys(%set))
+{
+    print "Clef=$k Valeur=$set{$k}\n";
+}
