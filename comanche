@@ -97,7 +97,7 @@ sub parse_conf
     return %conf;
 }
 
-$requete = "meleze12/Bureau/Systeme/TPlong/fichier.html";
+$requete = "fichier.html";
 %params = parse_request($requete);
 #print $params{"file"},"\n";
 
