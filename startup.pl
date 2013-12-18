@@ -17,8 +17,13 @@ if($#ARGV == 0){
 		if($retour_du_fork == 0){
 		    select (CLIENT);
 		    $requete = <CLIENT>;
-		    print CLIENT "HTTP/1.1 200 OK\r\n\r\n"; #ENTETE
-		    print $requete;
+		    @stats = stat("test.html");
+		    print "HTTP/1.1 200 OK\r\n" .
+			"Content-Type: text/html; charset=utf-8\r\n" .
+			"Content-Length: " . $stats[7] . "\r\n\r\n";
+		    open(PAGE,"test.html");
+		    while(<PAGE>){ print $_; }
+		    close(PAGE);
 		    close(CLIENT);
 		    exit 0;
 		}
@@ -45,7 +50,7 @@ if($#ARGV == 0){
 	print $pid,"\n";
 	exit 0;
     }
-    else{
+   else{
 	print "Parametre inconnu \n";
 	print "Usage : start|stop";
     }
