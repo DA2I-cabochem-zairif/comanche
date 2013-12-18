@@ -2,7 +2,7 @@
 use Socket;
 if($#ARGV == 0){
     chomp($ARGV[0]);
-    if($ARGV[0] eq "start" && -f "start" ){
+    if($ARGV[0] eq "start"){
 	print "Le serveur s'est bien démarré.\n";
 	$retour_du_fork=fork; #Premier fork permettant de gerer le serveur hors du star/stop
 	if($retour_du_fork==0){ # SERVEUR
@@ -29,7 +29,7 @@ if($#ARGV == 0){
 	    close (CLIENT);
 	    close (SERVEUR);
 	}
-	elsif($retour_du_fork != 0){ # START|STOP
+	else{
 	    open(PID, ">start");
 	    print PID "$retour_du_fork";
 	    close(PID);
@@ -37,7 +37,13 @@ if($#ARGV == 0){
     }
     elsif($ARGV[0] eq "stop"){
 	print "Fin du serveur\n";
-	#TODO : Arret du Serveur
+	print "$pidserv \n";
+	open(PID,"start");
+        $pid=<PID>;
+	close(PID);
+	kill SIGQUIT, $pid;
+	print $pid,"\n";
+	exit 0;
     }
     else{
 	print "Parametre inconnu \n";
@@ -46,5 +52,5 @@ if($#ARGV == 0){
    
 }else{
     print "Nombre de paramatre incorrect \n";
-    print "Usage : start|stop";
+    print "Usage : start|stop\n";
 }
