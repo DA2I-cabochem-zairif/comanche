@@ -16,9 +16,9 @@ doivent permettre :
 
 Todo
 ==========
-- Script Start Stop
 - Serveur web (avec fork pour multi client)
 - Gerer les redirections (Routes)
+/home/infoetu/zairif/tomcat/webapps/projet/toto.html devient var/www/toto.html
 - Gerer les CGI
 - gerer les formats .jpg, .html et textes
 - Fichier de logs

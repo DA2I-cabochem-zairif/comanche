@@ -57,13 +57,20 @@ sub get_request
 
 sub parse_request
 {
-    @request = split("/",$_[0]);
+    %conf = parse_conf();
+    @parse = split(" ",$_[0]);
+    @request = split("/", $parse[1]);
     $client = $request[0],"\n";
     $fichier = $request[$#request],"\n";
-    $chemin = "$request[1]";
+    $chemin = $request[1];
     for ($i = 2 ; $i < $#request ; $i++)
     {
 	$chemin = "$chemin/$request[$i]";
+    }
+    if ($chemin =~ "/".$conf{"route1"})
+    {
+	$chemin =~ $conf{"route2"};
+	print "Chemin : ".$chemin."\n";
     }
     return ("client" => $client, "path" => $chemin, "file" => $fichier);
 }
@@ -97,14 +104,15 @@ sub parse_conf
     return %conf;
 }
 
-$requete = "fichier.html";
+$requete = "GET /home/infoetu/zairif/tomcat/webapps/projet/index.html HTTP/1.1";
 %params = parse_request($requete);
-#print $params{"file"},"\n";
-
-%conf = parse_conf();
+#print "Fichier : ".$params{"file"},"\n";
+print "Chemin : ".$params{"path"},"\n";
+#%conf = parse_conf();
 #print $conf{"route2"},"\n";
 
 #foreach $k (keys(%conf))
 #{
 #    print "$k => $conf{$k}\n";
 #}
+

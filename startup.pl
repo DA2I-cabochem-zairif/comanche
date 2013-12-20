@@ -17,11 +17,12 @@ if($#ARGV == 0){
 		if($retour_du_fork == 0){
 		    select (CLIENT);
 		    $requete = <CLIENT>;
-		    @stats = stat("test.html");
+		    %params = parse_request($requete);
+		    @stats = stat("/".$params{"path"} ."/". $params{"file"});
 		    print "HTTP/1.1 200 OK\r\n" .
 			"Content-Type: text/html; charset=utf-8\r\n" .
 			"Content-Length: " . $stats[7] . "\r\n\r\n";
-		    open(PAGE,"test.html");
+		    open(PAGE, "/".$params{"path"} ."/". $params{"file"});
 		    while(<PAGE>){ print $_; }
 		    close(PAGE);
 		    close(CLIENT);
@@ -58,4 +59,69 @@ if($#ARGV == 0){
 }else{
     print "Nombre de paramatre incorrect \n";
     print "Usage : start|stop\n";
+}
+
+sub get_request
+{
+    %set = lireFichier();
+    socket(SERVEUR, PF_INET, SOCK_STREAM, getprotobyname('tcp'));
+    $adresse = inet_aton(@ARGV[0]) || die("inet_aton");
+    $adresse_complete = sockaddr_in($set{"port"}, $adresse) || die ("sock_addr");
+    connect(SERVEUR,$adresse_complete) || die("connect");
+
+    autoflush SERVEUR 1;
+    printf SERVEUR "GET /$ARGV[1] HTTP/1.1\n";
+    printf SERVEUR "Host:$ARGV[0]\n";
+    printf SERVEUR "\n";
+
+    while (<SERVEUR>)
+    {
+	print $_;
+    }
+
+    close (SERVEUR);
+}
+
+sub parse_request
+{
+    @parse = split(" ",$_[0]);
+    @request = split("/", $parse[1]);
+    $client = $request[0],"\n";
+    $fichier = $request[$#request],"\n";
+    $chemin = "$request[1]";
+    for ($i = 2 ; $i < $#request ; $i++)
+    {
+	$chemin = "$chemin/$request[$i]";
+    }
+    return ("client" => $client, "path" => $chemin, "file" => $fichier);
+}
+
+
+sub parse_conf
+{
+    %conf = ();
+    open(CONF,"comanche.conf");
+    while(<CONF>)
+    {
+	chomp;
+	@tmpset = split('\s',$_) if(/set/);
+	@tmproute = split('\s',$_) if(/route/);
+	@tmpexec = split('\s',$_) if(/exec/);
+	if ($tmpset[0] ne "")
+	{
+	    $conf{"$tmpset[1]"} = "$tmpset[2]";
+	}
+	if ($tmproute[0] ne "")
+	{
+	    $conf{"route1"} = "$tmproute[1]";
+	    $conf{"route2"} = "$tmproute[3]";
+	}
+	if ($tmpexec[0] ne "")
+	{
+	    $conf{"exec1"} = "$tmpexec[3]";
+	    $conf{"exec2"} = "$tmpexec[3]";
+	}
+	
+    }
+    return %conf;
 }
