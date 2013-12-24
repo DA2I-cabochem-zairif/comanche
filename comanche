@@ -2,117 +2,193 @@
 
 use Socket;
 
-sub lireFichier
-{
+if($#ARGV < 0){
+    die("Usage : start, stop, status, reload\n");
+}
+
+# Récupère la commande
+$commande = $ARGV[0];
+
+#Configuration du serveur 
+$pidServFile = ".pid";
+charger_conf();
+
+
+#Nombre de clients connecter
+@client = ();
+
+
+if($commande eq "start"){
+    if(-f $pidServFile){
+	die("Comanche est déjà en cours d'executions\n");
+    }
     
-}
+    $pid = fork;
+    if($pid != 0){
+	open(PID, ">$pidServFile");
+	print PID $pid;
+	close(PID);
 
-sub simple_serveur
-{
-    %set = lireFichier();
-    socket(SERVEUR, PF_INET, SOCK_STREAM, getprotobyname('tcp'));
-    setsockopt(SERVEUR, SOL_SOCKET, SOREUSEADDR, 1);
+	exit 0;
+    }else{
+	print "Lancement du serveur en cour\n veuillez patientez...\n";
+	socket(SERVEUR, PF_INET, SOCK_STREAM, getprotobyname('tcp'));
+	setsockopt(SERVEUR, SOL_SOCKET, SO_RUSEADDR, 1);
+	
+	$port = $conf{"global"}{"port"};
+	$addr = sockaddr_in($port, INADDR_ANY) || do { unlink($pidServFile); die("sockaddr_in\n"); };
+	bind(SERVEUR, $addr) || do { unlink($pidServFile); die("Le port $port est indisponible\n"); };
+	listen(SERVEUR, SOMAXCONN) || do { unlink($pidServFile); die("listen $!\n"); };
+	print "Serveur lancé sur le port $port \n";
+	
 
-    $mon_adresse = sockaddr_in($set{"port"}, INADDR_ANY);
+	while (accept(CLIENT,SERVEUR)){
+	    autoflush CLIENT 1;
 
-    bind(SERVEUR,$mon_adresse) || die("bind");
-
-    listen(SERVEUR, $set{"clients"}) || die("listen");
-    autoflush CLIENT 1;
-    while(accept(CLIENT, SERVEUR))
-    {
-	$pid = fork;
-	if($pid == 0)
-	{
-	    while(<CLIENT>)
-	    {
-		print CLIENT $_;
+	    $pid = fork;
+	    
+	    if($pid == 0){
+		$req = <CLIENT>;
+		while(<CLIENT> =~ /^\r?\n/){}#on ne fait rien si le client n'envoie pas de requete
+		
+		#@fichier = getFile($req);
+		repondre404();
+		
+		close CLIENT;
+		exit 0;
+		
 	    }
-	    exit 0;
 	}
+	close CLIENT;
+	close SERVEUR;
+
     }
-    close (SERVEUR);
+}elsif($commande eq "stop"){
+    kill QUIT, getpid() || die("Le serveur n'est pas en cour d'execution\n");
+    unlink($pidServFile);
+}elsif($commande eq "reload"){
+    getpid() || die("Le serveur n'est pas en cour d'execution\n");
+    chager_conf;
+}elsif($commande eq "status"){
+
 }
 
-sub get_request
-{
-    %set = lireFichier();
-    socket(SERVEUR, PF_INET, SOCK_STREAM, getprotobyname('tcp'));
-    $adresse = inet_aton(@ARGV[0]) || die("inet_aton");
-    $adresse_complete = sockaddr_in($set{"port"}, $adresse) || die ("sock_addr");
-    connect(SERVEUR,$adresse_complete) || die("connect");
+sub getPath{
+    my $req = $_[0];
 
-    autoflush SERVEUR 1;
-    printf SERVEUR "GET /$ARGV[1] HTTP/1.1\n";
-    printf SERVEUR "Host:$ARGV[0]\n";
-    printf SERVEUR "\n";
-
-    while (<SERVEUR>)
-    {
-	print $_;
+    $basedir = $conf{"global"}{"basedir"};
+    for $route (@{$config{rewrites}}){
+	if( $req =~ /$routes/){
+	    if(exists $config{"routes"}{$route}){
+		return ("route", $route, basedir . $conf{"routes"}{$route});
+	    }
+	    elsif(exists $config{"exec"}{$route}){
+		return ("exec", $route, basedir . $conf{"exec"}{$route});
+	    }
+	}
     }
 
-    close (SERVEUR);
+    repondre404();
 }
 
-sub parse_request
-{
-    %conf = parse_conf();
-    @parse = split(" ",$_[0]);
-    @request = split("/", $parse[1]);
-    $client = $request[0],"\n";
-    $fichier = $request[$#request],"\n";
-    $chemin = $request[1];
-    for ($i = 2 ; $i < $#request ; $i++)
-    {
-	$chemin = "$chemin/$request[$i]";
+
+sub getFile {
+    my @path = getPath($_[0]);
+    my $param1 = qr/$path/;
+    
+    $_ = $_[0];
+    
+    my @find = m/$param1/;
+    my $param2 = $path[2];
+    
+
+    for (@find){
+	$f = $find[$i++];
+	$param2 =~ s{\\$i}{$f};
     }
-    if ($chemin =~ "/".$conf{"route1"})
-    {
-	$chemin =~ $conf{"route2"};
-	print "Chemin : ".$chemin."\n";
+
+    m/$param2/;
+
+    if(-d $param2){
+	$param2 = $param2 . "/" . $config{"global"}{"index"};
     }
-    return ("client" => $client, "path" => $chemin, "file" => $fichier);
+    return ($route[0],$p2);
 }
 
-sub parse_conf
-{
-    %conf = ();
-    open(CONF,"comanche.conf");
-    while(<CONF>)
-    {
-	chomp;
-	@tmpset = split('\s',$_) if(/set/);
-	@tmproute = split('\s',$_) if(/route/);
-	@tmpexec = split('\s',$_) if(/exec/);
-	if ($tmpset[0] ne "")
-	{
-	    $conf{"$tmpset[1]"} = "$tmpset[2]";
-	}
-	if ($tmproute[0] ne "")
-	{
-	    $conf{"route1"} = "$tmproute[1]";
-	    $conf{"route2"} = "$tmproute[3]";
-	}
-	if ($tmpexec[0] ne "")
-	{
-	    $conf{"exec1"} = "$tmpexec[3]";
-	    $conf{"exec2"} = "$tmpexec[3]";
+
+
+sub getpid{
+    open(GETPID, "$pidServFile");
+    $pid = <GETPID>;
+    close(GETPID);
+    return $pid;
+}
+
+sub charger_conf{
+    undef %conf;
+
+    open(CONF, "comanche.conf") || die("Impossible de charger le fichier de config");
+    while(<CONF>){
+	if(/^set\s+(.+)\s+(.+)/){
+	    $key = $1; #Key
+	    $value = $2;
+	    
+	    if($key =~ /port/){
+		unless($value =~ /[\d+]/ && $value >= 1 && $valeur <= 65535){
+		    die("Numero de port invalide");
+		}
+	    }elsif($key =~ /clients/){
+		unless($value =~ /\d+/){
+		    die("Nombre de client invalide");
+		}
+	    }elsif($key =~ /default/){
+		unless(-f $value){
+		    die("Fichier $value inexistant");
+		}
+	    }
+
+	    $conf{"global"}{$key} = $value;
+	}elsif(/^route\s+(.+?)\s+to\s+(.+)/){
+	    $conf{"routes"}{$1} = $2;
+	    push(@{$conf{"rewrites"}},$1);
+	}elsif(/^exec\s+(.+?)\s+from\s+(.+)/){
+	    $conf{"exec"}{$1} = $2;
+	    push(@{$conf{"rewrites"}},$1);
 	}
 	
     }
-    return %conf;
+    close(CONF);
 }
 
-$requete = "GET /home/infoetu/zairif/tomcat/webapps/projet/index.html HTTP/1.1";
-%params = parse_request($requete);
-#print "Fichier : ".$params{"file"},"\n";
-print "Chemin : ".$params{"path"},"\n";
-#%conf = parse_conf();
-#print $conf{"route2"},"\n";
+sub repondre404
+{
+     # Par défaut, la réponse sera la page définie dans la configuration
+    $reponse = lirefichier($conf{"global"}{"default"});
 
-#foreach $k (keys(%conf))
-#{
-#    print "$k => $conf{$k}\n";
-#}
+    # On envoie la réponse
+    printf CLIENT   "HTTP/1.1 404 Not Found\r\n" .
+                    "Content-Type: text/html\r\n" .
+                    "Content-Length: " . length($reponse) . "\r\n\r\n" .
+                    $reponse;
 
+    # Ajout au log de la requête effectuée
+    #ajouterlog("get-s", $ip, $req, $config{"global"}{"default"}, 404);
+
+    close CLIENT;
+
+    exit 0;
+}
+
+
+sub lirefichier
+{
+    my $contenu;
+
+    open(FICHIER, $_[0]) || return "";
+    while (<FICHIER>) {
+        $contenu .= $_;
+    }
+    close(FICHIER);
+
+    return $contenu;
+}
