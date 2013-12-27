@@ -1,7 +1,6 @@
 #!/usr/bin/perl
 
 use Socket;
-
 if($#ARGV < 0){
     die("Usage : start, stop, status, reload\n");
 }
@@ -27,10 +26,10 @@ if($commande eq "start"){
 	open(PID, ">$pidServFile");
 	print PID $pid;
 	close(PID);
-
 	exit 0;
     }else{
 	print "Lancement du serveur en cour\n veuillez patientez...\n";
+       
 	socket(SERVEUR, PF_INET, SOCK_STREAM, getprotobyname('tcp'));
 	setsockopt(SERVEUR, SOL_SOCKET, SO_RUSEADDR, 1);
 	
@@ -39,14 +38,18 @@ if($commande eq "start"){
 	bind(SERVEUR, $addr) || do { unlink($pidServFile); die("[ERR] Le port $port est indisponible\n"); };
 	listen(SERVEUR, SOMAXCONN) || do { unlink($pidServFile); die("listen $!\n"); };
 	print "Serveur lancé sur le port $port \n";
-	
-
+	ajouterLog(date(),"start","local",$port,"","");
 	while (accept(CLIENT,SERVEUR)){
 	    autoflush CLIENT 1;
 
 	    $pid = fork;
 	    
 	    if($pid == 0){
+
+		$peer = getpeername(CLIENT);
+                ($port, $iaddr) = sockaddr_in($peer);
+                $ip = inet_ntoa($iaddr);
+
 		$req = <CLIENT>;
 		while(<CLIENT> =~ /^\r?\n/){}#on ne fait rien si le client n'envoie pas de requete
 		
@@ -59,14 +62,8 @@ if($commande eq "start"){
 		@fichier = getFile($req); #retourne 404 ...
 		$fichier = $fichier[1];
 		
-		#print CLIENT "HTTP/1.1 200 OK \r\n" .
-		 #            "Content-type: text/html \r\n" .
-		#	     "Content-length:" . length($req) . "\r\n\r\n".
-		#	     $req;
-		
 		unless(-f $fichier){
-		    repondre404;
-		    print STDERR "Fichier inexistant \n";
+		    repondre404();
 		}
 		
 		$reponse = readFile($fichier);
@@ -89,6 +86,7 @@ if($commande eq "start"){
 }elsif($commande eq "stop"){
     kill QUIT, getpid() || die("Le serveur n'est pas en cour d'execution\n");
     unlink($pidServFile);
+    ajouterLog(date(),"stop","local",$conf{"global"}{"port"},"","");
 }elsif($commande eq "reload"){
     getpid() || die("Le serveur n'est pas en cour d'execution\n");
     chager_conf;
@@ -223,3 +221,28 @@ sub getpid
 
     return $pid;
 }
+
+
+sub date
+{
+    my ($s, $mn, $h, $j, $m, $a) = localtime(time);
+    my @mois = ("Janvier","Fevrier","Mars","Avril","Mai","Juin","Juillet","Aout","Septembre","Octobre","Novembre","Decembre");
+    
+    #Formatage de la date
+    $s  = ($s  > 10) ? $s  : "0$s";
+    $mn = ($mn > 10) ? $mn : "0$mn";
+    $h  = ($h  > 10) ? $h  : "0$h";
+    $a = $a + 1900;
+    
+    return "$j $mois[$m] $a - $h:$mn:$s";
+}
+
+
+sub ajouterLog
+{
+    open(LOG, ">>".$conf{"global"}{"logfile"});
+    $, = ";";
+    print LOG @_,"\n";
+    close(LOG);
+}
+
