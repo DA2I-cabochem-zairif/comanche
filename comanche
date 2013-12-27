@@ -13,7 +13,6 @@ $commande = $ARGV[0];
 $pidServFile = ".pid";
 charger_conf();
 
-
 #Nombre de clients connecter
 @client = ();
 
@@ -37,7 +36,7 @@ if($commande eq "start"){
 	
 	$port = $conf{"global"}{"port"};
 	$addr = sockaddr_in($port, INADDR_ANY) || do { unlink($pidServFile); die("sockaddr_in\n"); };
-	bind(SERVEUR, $addr) || do { unlink($pidServFile); die("Le port $port est indisponible\n"); };
+	bind(SERVEUR, $addr) || do { unlink($pidServFile); die("[ERR] Le port $port est indisponible\n"); };
 	listen(SERVEUR, SOMAXCONN) || do { unlink($pidServFile); die("listen $!\n"); };
 	print "Serveur lancé sur le port $port \n";
 	
@@ -51,8 +50,32 @@ if($commande eq "start"){
 		$req = <CLIENT>;
 		while(<CLIENT> =~ /^\r?\n/){}#on ne fait rien si le client n'envoie pas de requete
 		
-		#@fichier = getFile($req);
-		repondre404();
+		$req =~ /(?-i)GET(?i)\s(\/(?:.*))\sHTTP\/1\.1/ || print STDERR "Repondre 400 \n";
+
+		
+
+		$req = $1;
+
+		@fichier = getFile($req); #retourne 404 ...
+		$fichier = $fichier[1];
+		
+		#print CLIENT "HTTP/1.1 200 OK \r\n" .
+		 #            "Content-type: text/html \r\n" .
+		#	     "Content-length:" . length($req) . "\r\n\r\n".
+		#	     $req;
+		
+		unless(-f $fichier){
+		    repondre404;
+		    print STDERR "Fichier inexistant \n";
+		}
+		
+		$reponse = readFile($fichier);
+
+		print CLIENT "HTTP/1.1 200 OK\r\n" .
+		             "Content-Type: text/html \r\n" .
+			     "Content-length: " . length($reponse) . "\r\n\r\n" .
+			     $reponse;
+		
 		
 		close CLIENT;
 		exit 0;
@@ -73,114 +96,95 @@ if($commande eq "start"){
 
 }
 
-sub getPath{
-    my $req = $_[0];
 
-    $basedir = $conf{"global"}{"basedir"};
-    for $route (@{$config{rewrites}}){
-	if( $req =~ /$routes/){
-	    if(exists $config{"routes"}{$route}){
-		return ("route", $route, basedir . $conf{"routes"}{$route});
-	    }
-	    elsif(exists $config{"exec"}{$route}){
-		return ("exec", $route, basedir . $conf{"exec"}{$route});
-	    }
-	}
+sub charger_conf
+{
+    # Vide la configuration
+    undef %conf;
+
+    # Charge la configuration depuis le fichier comanche.conf
+    open(CONFIG, "comanche.conf") || die("Impossible de charger le fichier de configuration\n");
+    while(<CONFIG>) {
+        if(/^set\s+(.+)\s+(.+)/){
+            $cle    = $1;
+            $valeur = $2;
+
+            if($cle =~ /port/){         # Validation du port TCP
+                die("[Erreur configuration] Port invalide\n") unless($valeur =~ /[\d+]/ && $valeur >= 1 && $valeur <= 65535);
+            } elsif($cle =~ /clients/){ # Validation du nombre de clients
+                die("[Erreur configuration] Nombre de clients invalide\n") unless($valeur =~ /\d+/);
+            } elsif($cle =~ /default/){ # Validation du fichier par défaut
+                die("[Erreur configuration] Fichier default inaccessible\n") unless(-f $valeur);
+            } elsif($cle =~ /basedir/){ # Validation du dossier de base
+                die("[Erreur configuration] Dossier de base inaccessible\n") unless(-d $valeur);
+            }
+
+            $conf{"global"}{$cle} = $valeur;
+        } elsif (/^route\s+(.+?)\s+to\s+(.+)/) {
+            $conf{"routes"}{$1} = $2;
+            push(@{$conf{"rewriterules"}}, $1);
+        } elsif (/^exec\s+(.+?)\s+from\s+(.+)/) {
+            $conf{"exec"}{$1} = $2;
+            push(@{$conf{"rewriterules"}}, $1);
+        } 
+    }
+    close(CONFIG);
+}
+
+# Retourne la route associée à la requête
+sub getPath
+{
+    $req = $_[0];
+
+    # Gestion du dossier de base
+    $basedir = "";
+    if (exists $config{"global"}{"basedir"}) {
+        $basedir = $config{"global"}{"basedir"};
     }
 
+    # Parcours de toutes les règles de réécriture (routes & exec)
+    for $route (@{$conf{"rewriterules"}}) {
+        if ($req =~ /$route/) {
+            if (exists $conf{"routes"}{$route}) {
+                return ("route", $route, $basedir . $conf{"routes"}{$route});
+            } elsif (exists $conf{"exec"}{$route}) {
+                return ("exec", $route, $basedir . $conf{"exec"}{$route});
+            }
+        }
+    }
+
+    # Si la route ne correspond à rien, on retourne une 404
+    print STDERR "GetPath - Error 404";
     repondre404();
 }
 
 
-sub getFile {
-    my @path = getPath($_[0]);
-    my $param1 = qr/$path/;
-    
-    $_ = $_[0];
-    
-    my @find = m/$param1/;
-    my $param2 = $path[2];
-    
-
-    for (@find){
-	$f = $find[$i++];
-	$param2 =~ s{\\$i}{$f};
-    }
-
-    m/$param2/;
-
-    if(-d $param2){
-	$param2 = $param2 . "/" . $config{"global"}{"index"};
-    }
-    return ($route[0],$p2);
-}
-
-
-
-sub getpid{
-    open(GETPID, "$pidServFile");
-    $pid = <GETPID>;
-    close(GETPID);
-    return $pid;
-}
-
-sub charger_conf{
-    undef %conf;
-
-    open(CONF, "comanche.conf") || die("Impossible de charger le fichier de config");
-    while(<CONF>){
-	if(/^set\s+(.+)\s+(.+)/){
-	    $key = $1; #Key
-	    $value = $2;
-	    
-	    if($key =~ /port/){
-		unless($value =~ /[\d+]/ && $value >= 1 && $valeur <= 65535){
-		    die("Numero de port invalide");
-		}
-	    }elsif($key =~ /clients/){
-		unless($value =~ /\d+/){
-		    die("Nombre de client invalide");
-		}
-	    }elsif($key =~ /default/){
-		unless(-f $value){
-		    die("Fichier $value inexistant");
-		}
-	    }
-
-	    $conf{"global"}{$key} = $value;
-	}elsif(/^route\s+(.+?)\s+to\s+(.+)/){
-	    $conf{"routes"}{$1} = $2;
-	    push(@{$conf{"rewrites"}},$1);
-	}elsif(/^exec\s+(.+?)\s+from\s+(.+)/){
-	    $conf{"exec"}{$1} = $2;
-	    push(@{$conf{"rewrites"}},$1);
-	}
-	
-    }
-    close(CONF);
-}
-
-sub repondre404
+# Donne le chemin réel du fichier demandé par la requête
+sub getFile
 {
-     # Par défaut, la réponse sera la page définie dans la configuration
-    $reponse = lirefichier($conf{"global"}{"default"});
+    my @route = getPath($_[0]);
+    my $p1 = qr/$route[1]/;
 
-    # On envoie la réponse
-    printf CLIENT   "HTTP/1.1 404 Not Found\r\n" .
-                    "Content-Type: text/html\r\n" .
-                    "Content-Length: " . length($reponse) . "\r\n\r\n" .
-                    $reponse;
+    $_ = $_[0];
 
-    # Ajout au log de la requête effectuée
-    #ajouterlog("get-s", $ip, $req, $config{"global"}{"default"}, 404);
+    my @matches = m/$p1/;
+    my $p2 = $route[2];
 
-    close CLIENT;
+    for (@matches) {
+           $m = $matches[$i++];
+           $p2 =~ s{\\$i}{$m};
+    }
 
-    exit 0;
+    m/$p2/;
+
+    if (-d $p2) {
+        $p2 = $p2 . "/" . $conf{"global"}{"index"};
+    }
+
+    return ($route[0], $p2);
 }
 
-
-sub lirefichier
+sub readFile
 {
     my $contenu;
 
@@ -189,6 +193,33 @@ sub lirefichier
         $contenu .= $_;
     }
     close(FICHIER);
-
     return $contenu;
+}
+
+# Renvoie une erreur 404
+sub repondre404
+{
+        # Par défaut, la réponse sera la page définie dans la configuration
+    $reponse = readFile($conf{"global"}{"default"});
+
+    # On envoie la réponse
+    printf CLIENT   "HTTP/1.1 404 Not Found\r\n" .
+                    "Content-Type: text/html\r\n" .
+                    "Content-Length: " . length($reponse) . "\r\n\r\n" .
+                    $reponse;
+
+    # TODO : LOG
+
+    close CLIENT;
+
+    exit 0;
+}
+
+sub getpid
+{
+    open(PID, "$pidServFile");
+    $pid = <PID>;
+    close(PID);
+
+    return $pid;
 }
