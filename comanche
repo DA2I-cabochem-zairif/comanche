@@ -35,23 +35,26 @@ if($commande eq "start"){
 	
 	$port = $conf{"global"}{"port"};
 	$addr = sockaddr_in($port, INADDR_ANY) || do { unlink($pidServFile); die("sockaddr_in\n"); };
+
 	bind(SERVEUR, $addr) || do { unlink($pidServFile); die("[ERR] Le port $port est indisponible\n"); };
 	listen(SERVEUR, SOMAXCONN) || do { unlink($pidServFile); die("listen $!\n"); };
-	print "Serveur lancé sur le port $port \n";
+
 	ajouterLog(date(),"start","local",$port,"","");
-	$started = 1;
-	while (accept(CLIENT,SERVEUR) or do { last if $started eq 0; next if $!{EINTR}; die("Accept impossible : $!\n"); } ){
+
+	$start = 1;
+
+	while (accept(CLIENT,SERVEUR) or do { last if $start eq 0; next if $!{EINTR}; die("Accept impossible : $!\n"); } ){
 	    autoflush CLIENT 1;
 	    if($#client >= $config{"global"}{"clients"}){
 		 $reponse  = "<html><body>" .
-                        "<h1>503 Service Unavailable</h1>" .
-                        "<h2>Trop de connexions simultanées, réessayez plus tard</h2>" .
-                        "</body></html>";
+                             "<h1>503 Service Unavailable</h1>" .
+			     "<h2>Trop de connexions simultanées, réessayez plus tard</h2>" .
+			     "</body></html>";
 		 
 		 printf CLIENT  "HTTP/1.1 503 Service Unavailable\r\n" .
-		     "Content-Type: text/html; charset=utf-8\r\n" .
-		     "Content-Length: " . length($reponse) . "\r\n\r\n" .
-		     $reponse;
+                                "Content-Type: text/html; charset=utf-8\r\n" .
+				"Content-Length: " . length($reponse) . "\r\n\r\n" .
+				$reponse;
 	    }else{
 		$pid = fork;
 	    
@@ -64,27 +67,45 @@ if($commande eq "start"){
 		    $req = <CLIENT>;
 		    while(<CLIENT> =~ /^\r?\n/){}#on ne fait rien si le client n'envoie pas de requete
 		    
-		    $req =~ /(?-i)GET(?i)\s(\/(?:.*))\sHTTP\/1\.1/ || print STDERR "Repondre 400 \n";
+		    $req =~ /(?-i)GET(?i)\s(\/(?:.*))\sHTTP\/1\.1/ || repondre400;
 		    
 		    
 		    
 		    $req = $1;
 		    
-		    @fichier = getFile($req); #retourne 404 ...
+		    @fichier = getFile($req);
+		    $exec = $fichier[0] eq "exec";
 		    $fichier = $fichier[1];
 		    
 		    unless(-f $fichier){
 			repondre404();
 		    }
 		    
+		    
+
 		    $reponse = readFile($fichier);
+
+		    if($exec) {
+			$reponse = cgi($fichier);
+			$ext = ".html";
+			$type = "get-d";
+		    }else{
+			$ext = ext($fichier);
+			$type = "get-s";
+		    }
+		    repondre404() unless( $ext eq ".jpg" or $ext eq ".JPG" or $ext eq ".jpeg" or $ext eq ".JPEG" or $ext eq ".txt" or $ext eq ".TXT" or $ext eq ".html" or $ext eq ".HTML" );
+
+		    #Gestion des mimetype
+		    $mimetype = "image/jpeg" if($ext eq ".jpg" or $ext eq ".JPG" or $ext eq ".jpeg" or $ext eq ".JPEG");
+		    $mimetype = "text/html"  if($ext eq ".html" or $ext eq ".HTML");
+		    $mimetype = "text/plain" if($ext eq ".txt" or $ext eq ".TXT");
 		    
 		    print CLIENT "HTTP/1.1 200 OK\r\n" .
-			"Content-Type: text/html \r\n" .
+			"Content-Type:".$mimetype." \r\n" .
 			"Content-length: " . length($reponse) . "\r\n\r\n" .
 			$reponse;
 		    
-		    
+		    ajouterLog(date(),$type,$ip,$req,$fichier,200);
 		    close CLIENT;
 		    exit 0;
 		    
@@ -189,7 +210,7 @@ sub getFile
     m/$p2/;
 
     if (-d $p2) {
-        $p2 = $p2 . "/" . $conf{"global"}{"index"};
+        $p2 = $p2 . $conf{"global"}{"index"};
     }
 
     return ($route[0], $p2);
@@ -214,16 +235,28 @@ sub repondre404
     $reponse = readFile($conf{"global"}{"default"});
 
     # On envoie la réponse
-    printf CLIENT   "HTTP/1.1 404 Not Found\r\n" .
-                    "Content-Type: text/html\r\n" .
-                    "Content-Length: " . length($reponse) . "\r\n\r\n" .
-                    $reponse;
+    print CLIENT "HTTP/1.1 404 Not Found\r\n" .
+	         "Content-Type: text/html\r\n" .
+		 "Content-Length: " . length($reponse) . "\r\n\r\n" .
+		 $reponse;
 
-    # TODO : LOG
-
+    ajouterLog("get-s", $ip, $req, $conf{"global"}{"default"}, 404);
     close CLIENT;
 
     exit 0;
+}
+
+#meme schema que pour repondre 400;
+sub repondre400
+{
+    $reponse = "<html><head><title>Bad request</title></head><body><h1>Bad Request</h1></body></html>";
+    print CLIENT "HTTP/1.1 400 Bad Request\r\n" .
+	         "Content-type : text/html\r\n" .
+		 "Content-Length: " . length($reponse) . "\r\n\r\n" .
+		 $reponse;
+    close CLIENT;
+    exit 0;
+
 }
 
 sub getpid
@@ -263,4 +296,17 @@ sub retirerfils
 {
     $pid = wait();
     @client = grep { $_ != $pid } @client;
+}
+
+sub cgi
+{
+    return `perl $_[0]`;
+}
+
+
+sub ext
+{
+    my $fichier = $_[0];
+    my ($ext) = $fichier =~ /(\.[^.]+)$/;
+    return $ext;
 }
