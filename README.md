@@ -17,9 +17,3 @@ doivent permettre :
 Todo
 ==========
 - Gerer les CGI
-- gerer les formats .jpg, .html et textes
-- Fichier de logs requete get-s et get-d)
-
-
-Fix
-==========
