@@ -20,7 +20,7 @@ if($commande eq "start"){
     if(-f $pidServFile){
 	die("Comanche est déjà en cours d'executions\n");
     }
-    
+    $SIG{CHLD} = \&retirerfils;
     $pid = fork;
     if($pid != 0){
 	open(PID, ">$pidServFile");
@@ -39,45 +39,59 @@ if($commande eq "start"){
 	listen(SERVEUR, SOMAXCONN) || do { unlink($pidServFile); die("listen $!\n"); };
 	print "Serveur lancé sur le port $port \n";
 	ajouterLog(date(),"start","local",$port,"","");
-	while (accept(CLIENT,SERVEUR)){
+	$started = 1;
+	while (accept(CLIENT,SERVEUR) or do { last if $started eq 0; next if $!{EINTR}; die("Accept impossible : $!\n"); } ){
 	    autoflush CLIENT 1;
-
-	    $pid = fork;
+	    if($#client >= $config{"global"}{"clients"}){
+		 $reponse  = "<html><body>" .
+                        "<h1>503 Service Unavailable</h1>" .
+                        "<h2>Trop de connexions simultanées, réessayez plus tard</h2>" .
+                        "</body></html>";
+		 
+		 printf CLIENT  "HTTP/1.1 503 Service Unavailable\r\n" .
+		     "Content-Type: text/html; charset=utf-8\r\n" .
+		     "Content-Length: " . length($reponse) . "\r\n\r\n" .
+		     $reponse;
+	    }else{
+		$pid = fork;
 	    
-	    if($pid == 0){
-
-		$peer = getpeername(CLIENT);
-                ($port, $iaddr) = sockaddr_in($peer);
-                $ip = inet_ntoa($iaddr);
-
-		$req = <CLIENT>;
-		while(<CLIENT> =~ /^\r?\n/){}#on ne fait rien si le client n'envoie pas de requete
-		
-		$req =~ /(?-i)GET(?i)\s(\/(?:.*))\sHTTP\/1\.1/ || print STDERR "Repondre 400 \n";
-
-		
-
-		$req = $1;
-
-		@fichier = getFile($req); #retourne 404 ...
-		$fichier = $fichier[1];
-		
-		unless(-f $fichier){
-		    repondre404();
+		if($pid == 0){
+		    
+		    $peer = getpeername(CLIENT);
+		    ($port, $iaddr) = sockaddr_in($peer);
+		    $ip = inet_ntoa($iaddr);
+		    
+		    $req = <CLIENT>;
+		    while(<CLIENT> =~ /^\r?\n/){}#on ne fait rien si le client n'envoie pas de requete
+		    
+		    $req =~ /(?-i)GET(?i)\s(\/(?:.*))\sHTTP\/1\.1/ || print STDERR "Repondre 400 \n";
+		    
+		    
+		    
+		    $req = $1;
+		    
+		    @fichier = getFile($req); #retourne 404 ...
+		    $fichier = $fichier[1];
+		    
+		    unless(-f $fichier){
+			repondre404();
+		    }
+		    
+		    $reponse = readFile($fichier);
+		    
+		    print CLIENT "HTTP/1.1 200 OK\r\n" .
+			"Content-Type: text/html \r\n" .
+			"Content-length: " . length($reponse) . "\r\n\r\n" .
+			$reponse;
+		    
+		    
+		    close CLIENT;
+		    exit 0;
+		    
 		}
-		
-		$reponse = readFile($fichier);
-
-		print CLIENT "HTTP/1.1 200 OK\r\n" .
-		             "Content-Type: text/html \r\n" .
-			     "Content-length: " . length($reponse) . "\r\n\r\n" .
-			     $reponse;
-		
-		
-		close CLIENT;
-		exit 0;
-		
+		push(@client,$pid);
 	    }
+	    close CLIENT;
 	}
 	close CLIENT;
 	close SERVEUR;
@@ -152,7 +166,6 @@ sub getPath
     }
 
     # Si la route ne correspond à rien, on retourne une 404
-    print STDERR "GetPath - Error 404";
     repondre404();
 }
 
@@ -246,3 +259,8 @@ sub ajouterLog
     close(LOG);
 }
 
+sub retirerfils
+{
+    $pid = wait();
+    @client = grep { $_ != $pid } @client;
+}
