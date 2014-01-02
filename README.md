@@ -3,7 +3,7 @@
 
 *Auteurs :*
 ----------
-Maxime Caboche, Fouad Zairi
+[Maxime Caboche](https://github.com/mcaboche), [Fouad Zairi](https://github.com/fosonaf)
 
 *Principe :*
 ----------
