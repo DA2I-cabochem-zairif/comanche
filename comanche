@@ -15,12 +15,22 @@ charger_conf();
 #Nombre de clients connecter
 @client = ();
 
+#compteurs de requêtes
+$reqRecues  = 0;
+$reqTraitees = 0;
+
 
 if($commande eq "start"){
     if(-f $pidServFile){
 	die("Comanche est déjà en cours d'executions\n");
     }
+    #Signaux
     $SIG{CHLD} = \&retirerfils;
+    $SIG{USR1} = \&status;
+    $SIG{QUIT} = \&stop;
+    $SIG{HUP}  = \&reload;
+
+
     $pid = fork;
     if($pid != 0){
 	open(PID, ">$pidServFile");
@@ -44,6 +54,7 @@ if($commande eq "start"){
 	$start = 1;
 
 	while (accept(CLIENT,SERVEUR) or do { last if $start eq 0; next if $!{EINTR}; die("Accept impossible : $!\n"); } ){
+	    $reqRecues+=1;
 	    autoflush CLIENT 1;
 	    if($#client >= $config{"global"}{"clients"}){
 		 $reponse  = "<html><body>" .
@@ -83,13 +94,13 @@ if($commande eq "start"){
 		    
 		    
 
-		    $reponse = readFile($fichier);
 
 		    if($exec) {
 			$reponse = cgi($fichier);
 			$ext = ".html";
 			$type = "get-d";
 		    }else{
+			$reponse = readFile($fichier);
 			$ext = ext($fichier);
 			$type = "get-s";
 		    }
@@ -111,6 +122,7 @@ if($commande eq "start"){
 		    
 		}
 		push(@client,$pid);
+		$reqTraitees ++;
 	    }
 	    close CLIENT;
 	}
@@ -123,10 +135,11 @@ if($commande eq "start"){
     unlink($pidServFile);
     ajouterLog(date(),"stop","local",$conf{"global"}{"port"},"","");
 }elsif($commande eq "reload"){
-    getpid() || die("Le serveur n'est pas en cour d'execution\n");
-    chager_conf;
+    kill HUP, getpid() || die("Le serveur n'est pas lancé\n");
 }elsif($commande eq "status"){
-
+    kill USR1, getpid() || die("Le serveur n'est pas lancé\n");
+}else{
+    print "Usage : start, stop, status, reload\n"
 }
 
 
@@ -139,20 +152,18 @@ sub charger_conf
     open(CONFIG, "comanche.conf") || die("Impossible de charger le fichier de configuration\n");
     while(<CONFIG>) {
         if(/^set\s+(.+)\s+(.+)/){
-            $cle    = $1;
-            $valeur = $2;
+            $key    = $1;
+            $val = $2;
 
-            if($cle =~ /port/){         # Validation du port TCP
-                die("[Erreur configuration] Port invalide\n") unless($valeur =~ /[\d+]/ && $valeur >= 1 && $valeur <= 65535);
-            } elsif($cle =~ /clients/){ # Validation du nombre de clients
-                die("[Erreur configuration] Nombre de clients invalide\n") unless($valeur =~ /\d+/);
-            } elsif($cle =~ /default/){ # Validation du fichier par défaut
-                die("[Erreur configuration] Fichier default inaccessible\n") unless(-f $valeur);
-            } elsif($cle =~ /basedir/){ # Validation du dossier de base
-                die("[Erreur configuration] Dossier de base inaccessible\n") unless(-d $valeur);
-            }
+            if($key =~ /port/){         # Validation du port TCP : doit etre compris entre 1 et 65535
+                die("[Erreur de configuration] Port invalide (le port doit etre compris entre 1 et 65535)\n") unless($val =~ /[\d+]/ && $val >= 1 && $val <= 65535);
+            } elsif($key =~ /clients/){ # Validation du nombre de clients : doit etre un nombre
+                die("[Erreur de configuration] Nombre de clients invalide(Doit etre un nombre) \n") unless($val =~ /\d+/);
+            } elsif($key =~ /default/){ # Validation du fichier par défaut
+                die("[Erreur de configuration] Fichier default introuvable ou inaccessible \n") unless(-f $val);
+            } 
 
-            $conf{"global"}{$cle} = $valeur;
+            $conf{"global"}{$key} = $val;
         } elsif (/^route\s+(.+?)\s+to\s+(.+)/) {
             $conf{"routes"}{$1} = $2;
             push(@{$conf{"rewriterules"}}, $1);
@@ -169,19 +180,13 @@ sub getPath
 {
     $req = $_[0];
 
-    # Gestion du dossier de base
-    $basedir = "";
-    if (exists $config{"global"}{"basedir"}) {
-        $basedir = $config{"global"}{"basedir"};
-    }
-
     # Parcours de toutes les règles de réécriture (routes & exec)
     for $route (@{$conf{"rewriterules"}}) {
         if ($req =~ /$route/) {
             if (exists $conf{"routes"}{$route}) {
-                return ("route", $route, $basedir . $conf{"routes"}{$route});
+                return ("route", $route,  $conf{"routes"}{$route});
             } elsif (exists $conf{"exec"}{$route}) {
-                return ("exec", $route, $basedir . $conf{"exec"}{$route});
+                return ("exec", $route, $conf{"exec"}{$route});
             }
         }
     }
@@ -196,23 +201,17 @@ sub getFile
 {
     my @route = getPath($_[0]);
     my $p1 = qr/$route[1]/;
-
     $_ = $_[0];
-
     my @matches = m/$p1/;
     my $p2 = $route[2];
-
     for (@matches) {
            $m = $matches[$i++];
            $p2 =~ s{\\$i}{$m};
     }
-
     m/$p2/;
-
     if (-d $p2) {
         $p2 = $p2 . $conf{"global"}{"index"};
     }
-
     return ($route[0], $p2);
 }
 
@@ -231,7 +230,7 @@ sub readFile
 # Renvoie une erreur 404
 sub repondre404
 {
-        # Par défaut, la réponse sera la page définie dans la configuration
+    # On considere que la page par default est celle qui reponds a une erreur de type 404
     $reponse = readFile($conf{"global"}{"default"});
 
     # On envoie la réponse
@@ -309,4 +308,21 @@ sub ext
     my $fichier = $_[0];
     my ($ext) = $fichier =~ /(\.[^.]+)$/;
     return $ext;
+}
+
+sub status
+{
+    $, = ",";
+    print "Numero de processus pere : $$\n" .
+	  "Requêtes :\n" .
+	  "\trecues : $reqRecues \n" .
+	  "\ttraitées : $reqTraitees \n" .
+	  "Nombre de clients connectée à l'instant : ".(($#client > 0) ? $#client : "0")." \n";
+    print @client;
+    close CLIENT;
+}
+
+sub reload
+{
+    charger_conf();
 }
