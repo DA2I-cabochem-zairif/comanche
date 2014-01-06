@@ -88,23 +88,26 @@ if($commande eq "start"){
 		    $exec = $fichier[0] eq "exec";
 		    $fichier = $fichier[1];
 		    
-		    unless(-f $fichier){
-			repondre404();
-		    }
-		    
-		    
-
-
-		    if($exec) {
-			$reponse = cgi($fichier);
+		    if(-d $fichier){
+			$reponse = lister($fichier);
 			$ext = ".html";
 			$type = "get-d";
 		    }else{
-			$reponse = readFile($fichier);
-			$ext = ext($fichier);
-			$type = "get-s";
+			unless(-f $fichier){
+			    repondre404();
+			}		    
+			if($exec) {
+			    $reponse = cgi($fichier);
+			    $ext = ".html";
+			    $type = "get-d";
+			}else{
+			    $reponse = readFile($fichier);
+			    $ext = ext($fichier) || ".html";
+			    $type = "get-s";
+			}
 		    }
-		    repondre404() unless( $ext eq ".jpg" or $ext eq ".JPG" or $ext eq ".jpeg" or $ext eq ".JPEG" or $ext eq ".txt" or $ext eq ".TXT" or $ext eq ".html" or $ext eq ".HTML" );
+
+		    repondre501() unless( $ext eq ".jpg" or $ext eq ".JPG" or $ext eq ".jpeg" or $ext eq ".JPEG" or $ext eq ".txt" or $ext eq ".TXT" or $ext eq ".html" or $ext eq ".HTML" );
 
 		    #Gestion des mimetype
 		    $mimetype = "image/jpeg" if($ext eq ".jpg" or $ext eq ".JPG" or $ext eq ".jpeg" or $ext eq ".JPEG");
@@ -190,7 +193,6 @@ sub getPath
             }
         }
     }
-
     # Si la route ne correspond à rien, on retourne une 404
     repondre404();
 }
@@ -210,7 +212,9 @@ sub getFile
     }
     m/$p2/;
     if (-d $p2) {
-        $p2 = $p2 . $conf{"global"}{"index"};
+	if(-f $p2.$conf{"global"}{"index"}){
+	    $p2 = $p2 . $conf{"global"}{"index"};
+	}
     }
     return ($route[0], $p2);
 }
@@ -232,7 +236,7 @@ sub repondre404
 {
     # On considere que la page par default est celle qui reponds a une erreur de type 404
     $reponse = readFile($conf{"global"}{"default"});
-
+    $reponse .= "<hr><p>Comanche Version 1</p>";
     # On envoie la réponse
     print CLIENT "HTTP/1.1 404 Not Found\r\n" .
 	         "Content-Type: text/html\r\n" .
@@ -248,8 +252,20 @@ sub repondre404
 #meme schema que pour repondre 400;
 sub repondre400
 {
-    $reponse = "<html><head><title>Bad request</title></head><body><h1>Bad Request</h1></body></html>";
+    $reponse = "<html><head><title>Bad request</title></head><body><h1>Bad Request</h1><hr><p>Comanche Version 1</p></body></html>";
     print CLIENT "HTTP/1.1 400 Bad Request\r\n" .
+	         "Content-type : text/html\r\n" .
+		 "Content-Length: " . length($reponse) . "\r\n\r\n" .
+		 $reponse;
+    close CLIENT;
+    exit 0;
+
+}
+#meme schema que pour repondre 400;
+sub repondre501
+{
+    $reponse = "<html><head><title>Service unvailable</title></head><body><h1>Service unvailable</h1><hr><p>comanche Version 1</p></body></html>";
+    print CLIENT "HTTP/1.1 501 Service unvailable\r\n" .
 	         "Content-type : text/html\r\n" .
 		 "Content-Length: " . length($reponse) . "\r\n\r\n" .
 		 $reponse;
@@ -322,7 +338,38 @@ sub status
     close CLIENT;
 }
 
+sub stop
+{
+    $start = 0;
+
+    while (wait != -1) {}
+}
+
+
 sub reload
 {
     charger_conf();
+}
+
+sub lister
+{
+    my $reponse = "<html><head><title>Comanche : index of $_[0]</title></head>".
+	          "<body><h1>Index of : $_[0]</h1><hr/><ul>";
+
+    opendir(REP,"$_[0]") or die "Impossible d'ouvrir : $dossier_local";
+    my @liste = readdir(REP);
+    @liste = grep {$_ ne "."} @liste;
+    @liste = grep {$_ ne ".."} @liste;
+    closedir REP;
+
+    foreach my $i (@liste) {
+        if (-d $i) {
+         $reponse .= " <li><a href=$i\> $i/</a></li>\n";
+        }else{
+         $reponse .= " <li><a href=$i> $i</a></li>\n";
+        }
+    }
+    
+    $reponse .= "</ul><hr><p>Comanche Version 1</p></body></html>";
+    return $reponse;
 }
