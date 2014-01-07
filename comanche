@@ -1,7 +1,9 @@
 #!/usr/bin/perl
 
 use Socket;
-if($#ARGV < 0){
+
+#on verifie le nombre parametre
+if($#ARGV < 0 || $#ARGV>1){
     die("Usage : start, stop, status, reload\n");
 }
 
@@ -19,8 +21,10 @@ charger_conf();
 $reqRecues  = 0;
 $reqTraitees = 0;
 
-
+#Gestion des commandes du serveur
+#Si on demande au serveur de demarré
 if($commande eq "start"){
+    #Si le serveur est déjà demarré on arrete le lancement
     if(-f $pidServFile){
 	die("Comanche est déjà en cours d'executions\n");
     }
@@ -30,16 +34,19 @@ if($commande eq "start"){
     $SIG{QUIT} = \&stop;
     $SIG{HUP}  = \&reload;
 
-
+    #on effectue un premier fork permettant de rendre la main à l'utilisateur
     $pid = fork;
     if($pid != 0){
+	#on enregistre le pid du serveur
 	open(PID, ">$pidServFile");
 	print PID $pid;
 	close(PID);
 	exit 0;
     }else{
+	#on lance le serveur
 	print "Lancement du serveur en cour\n veuillez patientez...\n";
        
+	#Traitement "classique de la socket"
 	socket(SERVEUR, PF_INET, SOCK_STREAM, getprotobyname('tcp'));
 	setsockopt(SERVEUR, SOL_SOCKET, SO_RUSEADDR, 1);
 	
@@ -48,14 +55,25 @@ if($commande eq "start"){
 
 	bind(SERVEUR, $addr) || do { unlink($pidServFile); die("[ERR] Le port $port est indisponible\n"); };
 	listen(SERVEUR, SOMAXCONN) || do { unlink($pidServFile); die("listen $!\n"); };
-
+	
+	#On ajoute dans le fichier de log l'information que le serveur à etait demarré
 	ajouterLog(date(),"start","local",$port,"","");
 
+	#variable qui permet de gerer le start/stop du serveur
 	$start = 1;
-
+	
+	#tant qu'on accepte des client on envoie la requete.
+	#sinon on "casse" la boucle si la variable start est egal 0
+	#on passe a la suite si un interuption d'un appelle system (Interrupted system call)
+	#sinon on quitte la socket
 	while (accept(CLIENT,SERVEUR) or do { last if $start eq 0; next if $!{EINTR}; die("Accept impossible : $!\n"); } ){
+	    
+	    #On ajoute 1 au nombre de requete recue (STATUS)
 	    $reqRecues+=1;
+
 	    autoflush CLIENT 1;
+
+	    #Si trop de client simultannée on reponds avec une erreur 503
 	    if($#client >= $config{"global"}{"clients"}){
 		 $reponse  = "<html><body>" .
                              "<h1>503 Service Unavailable</h1>" .
@@ -66,11 +84,13 @@ if($commande eq "start"){
                                 "Content-Type: text/html; charset=utf-8\r\n" .
 				"Content-Length: " . length($reponse) . "\r\n\r\n" .
 				$reponse;
+	     #Sinon on lance le fork pour que les clients puissent se connecter en simultannées
 	    }else{
 		$pid = fork;
 	    
 		if($pid == 0){
 		    
+		    #permet de recuperer l'addresse IP du client
 		    $peer = getpeername(CLIENT);
 		    ($port, $iaddr) = sockaddr_in($peer);
 		    $ip = inet_ntoa($iaddr);
@@ -78,35 +98,45 @@ if($commande eq "start"){
 		    $req = <CLIENT>;
 		    while(<CLIENT> =~ /^\r?\n/){}#on ne fait rien si le client n'envoie pas de requete
 		    
+		    #On verifie l'entete de la requete. Si la requete n'est pas bonne on reponds 400
 		    $req =~ /(?-i)GET(?i)\s(\/(?:.*))\sHTTP\/1\.1/ || repondre400;
 		    
-		    
-		    
+		    #on recupere l'url entrée	    
 		    $req = $1;
 		    
+		    #on va chercher le fichier
 		    @fichier = getFile($req);
+		    #si on detecte que c'est un fichier a executer
 		    $exec = $fichier[0] eq "exec";
+		    #on indique le fichier a chercher
 		    $fichier = $fichier[1];
 		    
+		    #Si le fichier est un dossier on liste (getFile s'occupe de verifie la presence d'un fichier d'index ou non dans le dossier)
 		    if(-d $fichier){
 			$reponse = lister($fichier);
 			$ext = ".html";
 			$type = "get-d";
+		    #Si ce n'est pas un dossier
 		    }else{
+			#On reponds 404 sauf si c'est un fichier regulier
 			unless(-f $fichier){
 			    repondre404();
-			}		    
+			}
+			#si c'est un fichier a exectuer
 			if($exec) {
+			    #on recupere le resultat de la reponse
 			    $reponse = cgi($fichier);
 			    $ext = ".html";
 			    $type = "get-d";
+			#sinon on lis le fichier et on l'affiche
 			}else{
 			    $reponse = readFile($fichier);
-			    $ext = ext($fichier) || ".html";
+			    $ext = ext($fichier);
 			    $type = "get-s";
 			}
 		    }
-
+		    
+		    #on reponds 501 sauf si le fichier fait partie des types de fichier a gerer (html, jpg ou txt)
 		    repondre501() unless( $ext eq ".jpg" or $ext eq ".JPG" or $ext eq ".jpeg" or $ext eq ".JPEG" or $ext eq ".txt" or $ext eq ".TXT" or $ext eq ".html" or $ext eq ".HTML" );
 
 		    #Gestion des mimetype
@@ -114,17 +144,20 @@ if($commande eq "start"){
 		    $mimetype = "text/html"  if($ext eq ".html" or $ext eq ".HTML");
 		    $mimetype = "text/plain" if($ext eq ".txt" or $ext eq ".TXT");
 		    
+		    #on envoie au client le resultat de la requete 
 		    print CLIENT "HTTP/1.1 200 OK\r\n" .
 			"Content-Type:".$mimetype." \r\n" .
 			"Content-length: " . length($reponse) . "\r\n\r\n" .
 			$reponse;
-		    
+		    #on ajoute au log qu'une resources a etait demandé
 		    ajouterLog(date(),$type,$ip,$req,$fichier,200);
 		    close CLIENT;
 		    exit 0;
 		    
 		}
+		#on insere dans le tableau client le pid actuelle du fork
 		push(@client,$pid);
+		#on incremente la variable reqTraitees pour afficher le status du serveur
 		$reqTraitees ++;
 	    }
 	    close CLIENT;
@@ -133,31 +166,38 @@ if($commande eq "start"){
 	close SERVEUR;
 
     }
+#Si on demande au serveur de s'arreter
 }elsif($commande eq "stop"){
     kill QUIT, getpid() || die("Le serveur n'est pas en cour d'execution\n");
     unlink($pidServFile);
     ajouterLog(date(),"stop","local",$conf{"global"}{"port"},"","");
+#Si on demande de recharger la configuration
+#petit bug lorsque l'on change de port
 }elsif($commande eq "reload"){
     kill HUP, getpid() || die("Le serveur n'est pas lancé\n");
+#Status du serveur (Nombre de requete, de client connecter etc...)
 }elsif($commande eq "status"){
     kill USR1, getpid() || die("Le serveur n'est pas lancé\n");
+#Si on demande une commande qui n'exite pas
 }else{
     print "Usage : start, stop, status, reload\n"
 }
 
-
+#procedure qui permet de charger la configuration du serveur
 sub charger_conf
 {
-    # Vide la configuration
+    # Vide la configuration (permet le rechargement)
     undef %conf;
 
     # Charge la configuration depuis le fichier comanche.conf
     open(CONFIG, "comanche.conf") || die("Impossible de charger le fichier de configuration\n");
     while(<CONFIG>) {
+	#Si on trouve un ligne de type "set <cle> <valeur>"
         if(/^set\s+(.+)\s+(.+)/){
             $key    = $1;
             $val = $2;
-
+	    
+	    #On verifie les valeurs à charger 
             if($key =~ /port/){         # Validation du port TCP : doit etre compris entre 1 et 65535
                 die("[Erreur de configuration] Port invalide (le port doit etre compris entre 1 et 65535)\n") unless($val =~ /[\d+]/ && $val >= 1 && $val <= 65535);
             } elsif($key =~ /clients/){ # Validation du nombre de clients : doit etre un nombre
@@ -165,16 +205,20 @@ sub charger_conf
             } elsif($key =~ /default/){ # Validation du fichier par défaut
                 die("[Erreur de configuration] Fichier default introuvable ou inaccessible \n") unless(-f $val);
             } 
-
+	    
+	    #aprés verification on ajoute ces valeur a une hash
             $conf{"global"}{$key} = $val;
+	#Si on trouve une ligne de type "route <regex> to <regex>"
         } elsif (/^route\s+(.+?)\s+to\s+(.+)/) {
             $conf{"routes"}{$1} = $2;
             push(@{$conf{"rewriterules"}}, $1);
+	#Si on trouve une ligne de type "exec <regex> to <regex>"
         } elsif (/^exec\s+(.+?)\s+from\s+(.+)/) {
             $conf{"exec"}{$1} = $2;
             push(@{$conf{"rewriterules"}}, $1);
         } 
     }
+    #on ferme le handler
     close(CONFIG);
 }
 
@@ -186,8 +230,10 @@ sub getPath
     # Parcours de toutes les règles de réécriture (routes & exec)
     for $route (@{$conf{"rewriterules"}}) {
         if ($req =~ /$route/) {
+	    #si la route correspond à une route presente dans le fichier de config
             if (exists $conf{"routes"}{$route}) {
                 return ("route", $route,  $conf{"routes"}{$route});
+	    #si la route correspond à une exectution de CGI
             } elsif (exists $conf{"exec"}{$route}) {
                 return ("exec", $route, $conf{"exec"}{$route});
             }
@@ -201,33 +247,41 @@ sub getPath
 # Donne le chemin réel du fichier demandé par la requête
 sub getFile
 {
-    my @route = getPath($_[0]);
-    my $p1 = qr/$route[1]/;
-    $_ = $_[0];
-    my @matches = m/$p1/;
-    my $p2 = $route[2];
+    
+    my @route = getPath($_[0]); #retourne un tablea avec les informations sur la location du fichier
+    my $param1 = qr/$route[1]/; #on affecte a param1 une expression qui peut etre utilisée a la place d'une expression perl
+    $_ = $_[0]; #on redefinie la variable par defaut
+    my @matches = m/$param1/; # la commande m permet de verifier si une chaine comporte un certain motif
+    my $param2 = $route[2]; #on indique la route
     for (@matches) {
            $m = $matches[$i++];
-           $p2 =~ s{\\$i}{$m};
+           $param2 =~ s{\\$i}{$m};
     }
-    m/$p2/;
-    if (-d $p2) {
-	if(-f $p2.$conf{"global"}{"index"}){
-	    $p2 = $p2 . $conf{"global"}{"index"};
+    m/$param2/;
+
+    #si param2 est un dossier on verifie l'existance d'un fichier index a l'interieur
+    if (-d $param2) {
+	if(-f $param2.$conf{"global"}{"index"}){
+	    $param2 = $param2 . $conf{"global"}{"index"};
 	}
     }
-    return ($route[0], $p2);
+    #si il n'existe pas on retourne juste le dossier ainsi que la route
+    return ($route[0], $param2);
 }
 
+# Procedure permettant de lire le contenue d'un fichier avant de l'afficher
 sub readFile
 {
+    #on protege la variable
     my $contenu;
-
+    
+    #on ouvre le fichier passer en parametre. vide sinon
     open(FICHIER, $_[0]) || return "";
     while (<FICHIER>) {
         $contenu .= $_;
     }
     close(FICHIER);
+    #on retour le contenu du fichier
     return $contenu;
 }
 
@@ -242,7 +296,7 @@ sub repondre404
 	         "Content-Type: text/html\r\n" .
 		 "Content-Length: " . length($reponse) . "\r\n\r\n" .
 		 $reponse;
-
+    #on ajoute les logs indiquant qu'il y a eu une requete de type 404
     ajouterLog("get-s", $ip, $req, $conf{"global"}{"default"}, 404);
     close CLIENT;
 
@@ -274,6 +328,7 @@ sub repondre501
 
 }
 
+#permet d'obtenir le pid sotocker dans un fichier lors du demerage
 sub getpid
 {
     open(PID, "$pidServFile");
@@ -283,42 +338,46 @@ sub getpid
     return $pid;
 }
 
-
+#permet de formater correctement la date
 sub date
 {
     my ($s, $mn, $h, $j, $m, $a) = localtime(time);
     my @mois = ("Janvier","Fevrier","Mars","Avril","Mai","Juin","Juillet","Aout","Septembre","Octobre","Novembre","Decembre");
     
-    #Formatage de la date
+    #Formatage de la date (ajouter de 0 si inferieur a 10)
     $s  = ($s  > 10) ? $s  : "0$s";
     $mn = ($mn > 10) ? $mn : "0$mn";
     $h  = ($h  > 10) ? $h  : "0$h";
     $a = $a + 1900;
     
+    #retourne la date sous la forme "J Mois AAAA - h:mn:s"
     return "$j $mois[$m] $a - $h:$mn:$s";
 }
 
-
+#procédure permetant d'ajouter des logs
 sub ajouterLog
 {
     open(LOG, ">>".$conf{"global"}{"logfile"});
+    #varibable qui permet de modifié le separateur lorsque l'on affiche une variable de type tableau (@)
     $, = ";";
     print LOG @_,"\n";
     close(LOG);
 }
 
+#procedure qui permet de supprimer les fils (signal CHLD)
 sub retirerfils
 {
     $pid = wait();
     @client = grep { $_ != $pid } @client;
 }
 
+#permet d'exectuer une CGI
 sub cgi
 {
     return `perl $_[0]`;
 }
 
-
+#permet de recuperer l'extension d'un fichier (utiliser pour les mimetypes)
 sub ext
 {
     my $fichier = $_[0];
@@ -326,6 +385,7 @@ sub ext
     return $ext;
 }
 
+#affiche les informations du serveur 
 sub status
 {
     $, = ",";
@@ -338,6 +398,7 @@ sub status
     close CLIENT;
 }
 
+#Permet de stoper le serveur
 sub stop
 {
     $start = 0;
@@ -345,28 +406,34 @@ sub stop
     while (wait != -1) {}
 }
 
-
+#Recharge la configuration du serveur
 sub reload
 {
     charger_conf();
 }
 
+#permet de lister un dossier et de proposer une navigation
 sub lister
 {
+    @directory = split("/",$_[0]);
+    
+    $parent_directory = join('/',($directory[0]..$directory[$#directory-1]));
     my $reponse = "<html><head><title>Comanche : index of $_[0]</title></head>".
 	          "<body><h1>Index of : $_[0]</h1><hr/><ul>";
-
+    
+   
     opendir(REP,"$_[0]") or die "Impossible d'ouvrir : $dossier_local";
     my @liste = readdir(REP);
-    @liste = grep {$_ ne "."} @liste;
-    @liste = grep {$_ ne ".."} @liste;
+    @liste = grep {$_ ne "."} @liste; #on supprime le dossier actuelle
+    @liste = grep {$_ ne ".."} @liste;#on supprime le dossier parent 
     closedir REP;
-
-    foreach my $i (@liste) {
+    
+    #pour tout les elements dans la liste
+    foreach (@liste) {
         if (-d $i) {
-         $reponse .= " <li><a href=$i\> $i/</a></li>\n";
+         $reponse .= " <li><a href=$_\/> $_</a></li>\n";
         }else{
-         $reponse .= " <li><a href=$i> $i</a></li>\n";
+         $reponse .= " <li><a href=$_> $_</a></li>\n";
         }
     }
     
